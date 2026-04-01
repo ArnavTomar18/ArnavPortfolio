@@ -4,7 +4,7 @@ import { Bot, User } from 'lucide-react';
 
 export default function MessageBubble({ message }) {
   const isUser = message.role === 'user';
-  const { response } = message;
+  const response = message?.response;
 
   if (!response) return null;
 
@@ -16,7 +16,7 @@ export default function MessageBubble({ message }) {
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ type: 'spring', stiffness: 350, damping: 30 }}
     >
-      {/* Avatar */}
+      {/* AI Avatar */}
       {!isUser && (
         <div className="msg-avatar">
           <Bot size={14} />
@@ -25,31 +25,59 @@ export default function MessageBubble({ message }) {
 
       <div className="bubble-content">
 
-        {/* User message */}
+        {/* ---------------- USER MESSAGE ---------------- */}
         {isUser && (
           <div className="bubble bubble-user-msg">
-            {response.content}
+            <FormattedText text={response.content} />
           </div>
         )}
 
-        {/* ✅ TEXT */}
+        {/* ---------------- TEXT ---------------- */}
         {!isUser && response.type === 'text' && (
           <div className="bubble bubble-ai-msg">
             <FormattedText text={response.content} />
           </div>
         )}
 
-        {/* ✅ SKILLS (NEW FIX) */}
+        {/* ---------------- SKILLS ---------------- */}
         {!isUser && response.type === 'skills' && (
           <div className="bubble bubble-ai-msg">
-            <strong>Skills:</strong>
+            <strong>Skills</strong>
             <p>{response.summary}</p>
 
-            {response.categories?.length > 0 && (
-              <ul className="skills-list">
-                {response.categories.map((cat, i) => (
+            <div className="skills-block">
+              {response.categories?.map((cat, i) => (
+                <div key={i} className="skill-category">
+                  <span className="skill-title">{cat.name}</span>
+                  <div className="skill-items">
+                    {cat.items.map((item, j) => (
+                      <span key={j} className="skill-pill">{item}</span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ---------------- PROJECT ---------------- */}
+        {!isUser && response.type === 'project' && (
+          <ProjectCard project={response} />
+        )}
+
+        {/* ---------------- CONTACT ---------------- */}
+        {!isUser && response.type === 'contact' && (
+          <div className="bubble bubble-ai-msg">
+            <strong>Contact</strong>
+            <p>{response.message}</p>
+
+            {response.links?.length > 0 && (
+              <ul className="contact-links">
+                {response.links.map((link, i) => (
                   <li key={i}>
-                    <strong>{cat.name}:</strong> {cat.items.join(', ')}
+                    <a href={link.url} target="_blank" rel="noreferrer">
+                      {link.label}
+                    </a>
                   </li>
                 ))}
               </ul>
@@ -57,46 +85,21 @@ export default function MessageBubble({ message }) {
           </div>
         )}
 
-        {/* ✅ PROJECT */}
-        {!isUser && response.type === 'project' && (
-          <ProjectCard project={response} />
-        )}
-
-        {/* ✅ FALLBACK (IMPORTANT) */}
+        {/* ---------------- FALLBACK ---------------- */}
         {!isUser &&
           !['text', 'skills', 'project', 'contact'].includes(response.type) && (
             <div className="bubble bubble-ai-msg">
-              {JSON.stringify(response)}
+              {response.content || "I couldn't format that properly."}
             </div>
           )}
 
-        {/* Timestamp */}
+        {/* ---------------- TIME ---------------- */}
         <span className={`bubble-time ${isUser ? 'time-right' : 'time-left'}`}>
           {formatTime(message.timestamp)}
         </span>
       </div>
 
-      {!isUser && response.type === 'contact' && (
-        <div className="bubble bubble-ai-msg">
-          <strong>Contact:</strong>
-
-          <p>{response.message}</p>
-
-          {response.links?.length > 0 && (
-            <ul>
-              {response.links.map((link, i) => (
-                <li key={i}>
-                  <a href={link.url} target="_blank" rel="noreferrer">
-                    {link.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {/* User avatar */}
+      {/* USER AVATAR */}
       {isUser && (
         <div className="msg-avatar msg-avatar-user">
           <User size={14} />
@@ -106,8 +109,12 @@ export default function MessageBubble({ message }) {
   );
 }
 
+
+/* ---------------- FORMATTED TEXT ---------------- */
+
 function FormattedText({ text }) {
   const lines = text.split('\n');
+
   return (
     <span className="fmt-text">
       {lines.map((line, i) => {
@@ -117,6 +124,7 @@ function FormattedText({ text }) {
           }
           return part;
         });
+
         return (
           <span key={i} className="fmt-line">
             {formatted}
@@ -127,6 +135,9 @@ function FormattedText({ text }) {
     </span>
   );
 }
+
+
+/* ---------------- TIME FORMAT ---------------- */
 
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], {

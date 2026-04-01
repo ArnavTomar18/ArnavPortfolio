@@ -1,66 +1,92 @@
-import axios from 'axios';
+import axios from "axios";
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// ✅ Correct base URL (no trailing slash)
+const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const api = axios.create({
   baseURL: API_URL,
   timeout: 30000,
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
 });
 
-// Request interceptor for logging
+// ------------------------
+// REQUEST INTERCEPTOR
+// ------------------------
+
 api.interceptors.request.use(
-  (config) => {
-    return config;
-  },
+  (config) => config,
   (error) => Promise.reject(error)
 );
 
-// Response interceptor for error handling
+// ------------------------
+// RESPONSE INTERCEPTOR
+// ------------------------
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.code === 'ECONNABORTED') {
-      throw new Error('Request timed out. Please try again.');
+    if (error.code === "ECONNABORTED") {
+      throw new Error("Request timed out. Try again.");
     }
+
     if (!error.response) {
-      throw new Error('Cannot connect to the server. Please check your connection.');
+      throw new Error("Server not reachable. Check connection.");
     }
+
     if (error.response.status === 429) {
-      throw new Error('Too many messages. Please wait a moment and try again.');
+      throw new Error("Too many requests. Slow down.");
     }
+
     if (error.response.status === 503) {
-      throw new Error('AI service is temporarily unavailable. Please try again later.');
+      throw new Error("AI service unavailable. Try again later.");
     }
-    const message = error.response?.data?.detail || 'An unexpected error occurred.';
+
+    const message =
+      error.response?.data?.detail ||
+      "Something went wrong.";
+
     throw new Error(message);
   }
 );
 
+// ------------------------
+// CHAT API
+// ------------------------
+
 export const sendMessage = async (message, sessionId) => {
-  const response = await api.post('/api/chat', {
+  const response = await api.post("/chat", {
     message,
     session_id: sessionId,
   });
+
+  return response.data; // { response, session_id, sources }
+};
+
+// ------------------------
+// HEALTH CHECK
+// ------------------------
+
+export const checkHealth = async () => {
+  const response = await api.get("/health");
   return response.data;
 };
 
+// ------------------------
+// OPTIONAL: INGEST (if you still use it)
+// ------------------------
+
 export const ingestDocuments = async (forceReingest = false) => {
-  const response = await api.post('/api/ingest', {
+  const response = await api.post("/ingest", {
     force_reingest: forceReingest,
   });
   return response.data;
 };
 
 export const getIngestStatus = async () => {
-  const response = await api.get('/api/ingest/status');
-  return response.data;
-};
-
-export const checkHealth = async () => {
-  const response = await api.get('/health');
+  const response = await api.get("/ingest/status");
   return response.data;
 };
 

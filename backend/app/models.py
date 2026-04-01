@@ -1,8 +1,12 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any, Literal
 from enum import Enum
 import re
 
+
+# ------------------------
+# ENUMS
+# ------------------------
 
 class MessageRole(str, Enum):
     USER = "user"
@@ -10,35 +14,43 @@ class MessageRole(str, Enum):
     SYSTEM = "system"
 
 
+# ------------------------
+# CHAT MESSAGE
+# ------------------------
+
 class ConversationMessage(BaseModel):
     role: MessageRole
     content: str
 
 
+# ------------------------
+# REQUEST MODEL
+# ------------------------
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
     session_id: str = Field(..., min_length=1, max_length=100)
-    
-    @validator("message")
-    def sanitize_message(cls, v):
-        # Remove potential injection attempts
+
+    @field_validator("message")
+    @classmethod
+    def sanitize_message(cls, v: str):
         v = v.strip()
-        # Remove excessive whitespace
-        v = re.sub(r'\s+', ' ', v)
-        # Limit length after sanitization
-        if len(v) > 2000:
-            v = v[:2000]
-        return v
-    
-    @validator("session_id")
-    def sanitize_session_id(cls, v):
-        # Only allow alphanumeric, hyphens, underscores
-        v = re.sub(r'[^a-zA-Z0-9\-_]', '', v)
+        v = re.sub(r"\s+", " ", v)
+        return v[:2000]
+
+    @field_validator("session_id")
+    @classmethod
+    def sanitize_session_id(cls, v: str):
+        v = re.sub(r"[^a-zA-Z0-9\-_]", "", v)
         return v[:100]
 
 
+# ------------------------
+# RESPONSE TYPES
+# ------------------------
+
 class ProjectResponse(BaseModel):
-    type: Literal["project"] = "project"
+    type: Literal["project"]
     title: str
     description: str
     tech_stack: List[str]
@@ -47,16 +59,36 @@ class ProjectResponse(BaseModel):
     highlights: Optional[List[str]] = None
 
 
+class SkillsResponse(BaseModel):
+    type: Literal["skills"]
+    summary: str
+    categories: List[Dict[str, Any]]
+
+
+class ContactResponse(BaseModel):
+    type: Literal["contact"]
+    message: str
+    links: List[Dict[str, str]]
+
+
 class TextResponse(BaseModel):
-    type: Literal["text"] = "text"
+    type: Literal["text"]
     content: str
 
 
+# ------------------------
+# FINAL CHAT RESPONSE
+# ------------------------
+
 class ChatResponse(BaseModel):
-    response: Dict[str, Any]  # Either ProjectResponse or TextResponse dict
+    response: Dict[str, Any]  # flexible for all types
     session_id: str
     sources: Optional[List[str]] = None
 
+
+# ------------------------
+# INGEST (OPTIONAL)
+# ------------------------
 
 class IngestRequest(BaseModel):
     force_reingest: bool = False
