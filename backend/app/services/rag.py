@@ -1,4 +1,6 @@
 import logging
+import numpy as np
+import hashlib
 from typing import Dict, Any, List
 
 from app.services.vector_store import vector_store
@@ -12,97 +14,128 @@ logger = logging.getLogger(__name__)
 
 class RAGService:
     """
-    Retrieval Augmented Generation orchestrator.
-    Combines vector search, memory, and LLM generation.
+    Lightweight RAG pipeline (Render-safe)
     """
-    
-    async def query(
-        self,
-        user_message: str,
-        session_id: str,
-    ) -> Dict[str, Any]:
-        """
-        Full RAG pipeline:
-        1. Retrieve relevant context from vector store
-        2. Load conversation memory
-        3. Generate structured response
-        4. Update memory
-        """
-        
-        # Step 1: Retrieve relevant context
-        context, sources = await self._retrieve_context(user_message)
-        
-        # Step 2: Get conversation history
+
+    async def query(self, user_message: str, session_id: str) -> Dict[str, Any]:
+
+        # 1. Retrieve context
+        context, sources = self._retrieve_context(user_message)
+
+        # 2. Memory
         conversation_history = memory_service.get_history_as_dicts(session_id)
-        
-        # Step 3: Get LLM service
+
+        # 3. LLM
         llm = self._get_llm_service()
-        
-        # Step 4: Generate response
+
         response = await llm.generate_response(
             user_message=user_message,
             context=context,
             conversation_history=conversation_history,
         )
-        
-        # Step 5: Update memory with this exchange
+
+        # 4. Memory update
         memory_service.add_message(session_id, MessageRole.USER, user_message)
 
-        # ✅ FIXED summary handling
-        rtype = response.get("type")
+        memory_service.add_message(
+            session_id,
+            MessageRole.ASSISTANT,
+            self._summarize(response)
+        )
 
-        if rtype == "project":
-            assistant_summary = f"Project: {response.get('title', '')}"
+        logger.info(f"RAG query done | session={session_id}")
 
-        elif rtype == "skills":
-            assistant_summary = "Discussed Arnav's skills"
-
-        elif rtype == "contact":
-            assistant_summary = "Shared contact information"
-
-        else:
-            assistant_summary = response.get("content", "")[:500]
-
-        memory_service.add_message(session_id, MessageRole.ASSISTANT, assistant_summary)
-        
-        logger.info(f"RAG query completed for session {session_id}. Response type: {response.get('type')}")
-        
         return {
             "response": response,
             "session_id": session_id,
             "sources": sources
         }
-    
-    async def _retrieve_context(self, query: str) -> tuple[str, List[str]]:
-        """Retrieve and format relevant context from vector store."""
+
+    # ------------------------
+    # 🔍 CONTEXT RETRIEVAL
+    # ------------------------
+
+    def _retrieve_context(self, query: str):
+
         try:
-            results = await vector_store.similarity_search(query, k=settings.TOP_K_RESULTS)
-            
+            # ⚡ generate lightweight embedding
+            query_embedding = self._cheap_embedding(query)
+
+            # ⚡ FAISS search (SYNC, not async)
+            results = vector_store.search(
+                query_embedding,
+                k=settings.TOP_K_RESULTS
+            )
+
             if not results:
-                logger.warning("Using fallback context — FAISS returned no data")
+                logger.warning("Fallback: no FAISS results")
                 return self._get_fallback_context(), []
-            
+
             context_parts = []
             sources = []
-            
+
             for doc, score in results:
-                if score > 0.1:  # Minimum relevance threshold
-                    context_parts.append(doc["content"])
-                    if doc.get("source"):
-                        sources.append(doc["source"])
-            
+                if score > 0.05:
+                    # docs can be str OR dict depending on your index
+                    if isinstance(doc, dict):
+                        context_parts.append(doc.get("content", ""))
+                        if doc.get("source"):
+                            sources.append(doc["source"])
+                    else:
+                        context_parts.append(doc)
+
             if not context_parts:
-                logger.warning("Using fallback context — no relevant chunks after filtering")
+                logger.warning("Fallback: filtered empty")
                 return self._get_fallback_context(), []
-            
+
             context = "\n\n---\n\n".join(context_parts)
-            logger.debug(f"Retrieved {len(context_parts)} context chunks")
+
             return context, list(set(sources))
-        
+
         except Exception as e:
-            logger.error(f"Context retrieval failed: {e}")
+            logger.error(f"Context error: {e}")
             return self._get_fallback_context(), []
-    
+
+    # ------------------------
+    # ⚡ LIGHT EMBEDDING
+    # ------------------------
+
+    def _cheap_embedding(self, text: str) -> np.ndarray:
+        """
+        Deterministic lightweight embedding (no ML)
+        """
+        hash_val = hashlib.md5(text.encode()).hexdigest()
+
+        vec = np.zeros(384, dtype="float32")
+
+        for i, char in enumerate(hash_val):
+            vec[i % 384] += ord(char)
+
+        return vec
+
+    # ------------------------
+    # 🧠 MEMORY SUMMARY
+    # ------------------------
+
+    def _summarize(self, response):
+
+        rtype = response.get("type")
+
+        if rtype == "project":
+            return f"Project: {response.get('title', '')}"
+
+        if rtype == "skills":
+            return "Discussed skills"
+
+        if rtype == "contact":
+            return "Shared contact info"
+
+        return response.get("content", "")[:200]
+
+    # ------------------------
+    # 🧯 FALLBACK
+    # ------------------------
+
     def _get_fallback_context(self) -> str:
         return """
     Arnav Tomar – Full Stack Developer
@@ -125,13 +158,13 @@ class RAGService:
     - LinkedIn: https://linkedin.com/in/arnavtomar18
     - Email: mailto:arnavtomar1812007@gmail.com
     """
-    
+
+    # ------------------------
+    # 🔧 LLM SERVICE
+    # ------------------------
+
     def _get_llm_service(self) -> LLMService:
-        """Get or create LLM service instance."""
-        if llm_service is None:
-            from app.services.llm import LLMService
-            return LLMService()
-        return llm_service
+        return llm_service or LLMService()
 
 
 # Singleton

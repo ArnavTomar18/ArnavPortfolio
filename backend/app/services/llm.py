@@ -1,12 +1,17 @@
 import logging
 import json
 import re
-from typing import List, Dict, Any, Optional
-from groq import Groq, APIError, APIConnectionError, RateLimitError
+from typing import List, Dict, Any
 
+from groq import Groq, APIError, APIConnectionError, RateLimitError
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# ------------------------
+# SYSTEM PROMPT (CLEAN + STRONG)
+# ------------------------
 
 SYSTEM_PROMPT = """
 You are Arnav Tomar's personal AI assistant.
@@ -69,12 +74,16 @@ Make every answer feel:
 """
 
 
+# ------------------------
+# LLM SERVICE
+# ------------------------
+
 class LLMService:
-    """Groq LLM service for generating responses."""
 
     def __init__(self):
         if not settings.GROQ_API_KEY:
-            raise ValueError("GROQ_API_KEY is not configured")
+            raise ValueError("GROQ_API_KEY missing")
+
         self.client = Groq(api_key=settings.GROQ_API_KEY)
         self.model = settings.GROQ_MODEL
 
@@ -84,160 +93,115 @@ class LLMService:
         context: str,
         conversation_history: List[Dict[str, str]],
     ) -> Dict[str, Any]:
-        """Generate a structured response using RAG context and conversation history."""
-
-        augmented_message = f"""Context from Arnav's portfolio knowledge base:
-{context}
-
----
-
-User question: {user_message}
-
-You MUST return strictly valid JSON.
-
-Use ONLY one of these formats:
-
-1. TEXT:
-{{
-  "type": "text",
-  "content": "your answer"
-}}
-
-2. SKILLS:
-{{
-  "type": "skills",
-  "summary": "short summary of skills",
-  "categories": [
-    {{ "name": "Category Name", "items": ["skill1", "skill2"] }}
-  ]
-}}
-
-3. PROJECT:
-{{
-  "type": "project",
-  "title": "project name",
-  "description": "what it does",
-  "tech_stack": ["tech1", "tech2"],
-  "github": "url or null",
-  "live_demo": "url or null",
-  "highlights": ["point1", "point2"]
-}}
-
-4. CONTACT:
-{{
-  "type": "contact",
-  "message": "how to contact Arnav",
-  "links": [
-    {{ "label": "GitHub", "url": "https://github.com/arnavtomar18" }},
-    {{ "label": "LinkedIn", "url": "https://linkedin.com/in/arnavtomar18" }}
-    {{ "label": "Email", "url": "mailto:arnavtomar1812007@gmail.com" }}
-  ]
-}}
-
-Rules:
-- NEVER return empty fields
-- NEVER leave links empty for contact
-- NEVER invent information
-- If data is missing, return type "text"
-- Return ONLY JSON (no explanation, no markdown)
-"""
 
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SYSTEM_PROMPT}
         ]
 
+        # ⚡ limit memory (important)
         if conversation_history:
-            messages.extend(conversation_history[-settings.MAX_MEMORY_MESSAGES:])
+            messages.extend(conversation_history[-5:])
 
-        messages.append({"role": "user", "content": augmented_message})
+        # ⚡ clean prompt (reduced token load)
+        messages.append({
+            "role": "user",
+            "content": f"""
+Context:
+{context}
+
+Question:
+{user_message}
+
+Return JSON only.
+"""
+        })
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=settings.MAX_TOKENS,
                 temperature=settings.TEMPERATURE,
-                stream=False,
+                max_tokens=settings.MAX_TOKENS,
             )
 
-            raw_content = response.choices[0].message.content.strip()
-            logger.debug(f"LLM raw response: {raw_content[:200]}...")
+            raw = response.choices[0].message.content.strip()
+            logger.debug(f"LLM raw: {raw[:200]}")
 
-            parsed = self._parse_response(raw_content)
-            return parsed
+            return self._safe_parse(raw)
 
         except RateLimitError:
-            logger.error("Groq rate limit exceeded")
-            return {
-                "type": "text",
-                "content": "Too many requests hitting at once — give it a second and try again."
-            }
-        except APIConnectionError as e:
-            logger.error(f"Groq connection error: {e}")
-            return {
-                "type": "text",
-                "content": "Having trouble reaching the AI service right now. Try again in a moment."
-            }
-        except APIError as e:
-            logger.error(f"Groq API error: {e}")
-            return {
-                "type": "text",
-                "content": "Something went sideways on my end. Try sending that again."
-            }
+            return {"type": "text", "content": "Too many requests. Try again."}
 
-    def _parse_response(self, raw: str) -> Dict[str, Any]:
-        """Parse and validate LLM response as structured JSON."""
+        except APIConnectionError:
+            return {"type": "text", "content": "Connection issue. Try again."}
+
+        except APIError:
+            return {"type": "text", "content": "Something went wrong."}
+
+    # ------------------------
+    # SAFE JSON PARSER
+    # ------------------------
+
+    def _safe_parse(self, raw: str) -> Dict[str, Any]:
+
+        # remove markdown wrappers
         raw = re.sub(r'```json\s*', '', raw)
-        raw = re.sub(r'```\s*', '', raw)
-        raw = raw.strip()
+        raw = re.sub(r'```\s*', '', raw).strip()
+
+        # extract JSON block safely
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+
+        if not match:
+            return {"type": "text", "content": raw}
 
         try:
-            data = json.loads(raw)
-            response_type = data.get("type", "text")
+            data = json.loads(match.group(0))
+        except Exception:
+            return {"type": "text", "content": raw}
 
-            if response_type == "project":
-                return {
-                    "type": "project",
-                    "title": data.get("title", "Project"),
-                    "description": data.get("description", ""),
-                    "tech_stack": data.get("tech_stack", []),
-                    "github": data.get("github"),
-                    "live_demo": data.get("live_demo"),
-                    "highlights": data.get("highlights", []),
-                }
+        rtype = data.get("type", "text")
 
-            elif response_type == "skills":
-                return {
-                    "type": "skills",
-                    "summary": data.get("summary", ""),
-                    "categories": data.get("categories", []),
-                }
-            elif response_type == "contact":
-                links = data.get("links", [])
-                if not links:
-                    return {
-                        "type": "text",
-                        "content": "You can contact Arnav via GitHub or LinkedIn."
-                    }
-                return {
-                    "type": "contact",
-                    "message": data.get("message", "You can reach Arnav here:"),
-                    "links": links,
-                }
+        # ------------------------
+        # STRUCTURED OUTPUT
+        # ------------------------
 
-            else:
-                return {
-                    "type": "text",
-                    "content": data.get("content", raw)
-                }
-
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse JSON response, wrapping as text: {raw[:100]}")
+        if rtype == "project":
             return {
-                "type": "text",
-                "content": raw
+                "type": "project",
+                "title": data.get("title", "Project"),
+                "description": data.get("description", ""),
+                "tech_stack": data.get("tech_stack", []),
+                "github": data.get("github"),
+                "live_demo": data.get("live_demo"),
+                "highlights": data.get("highlights", []),
             }
 
+        if rtype == "skills":
+            return {
+                "type": "skills",
+                "summary": data.get("summary", ""),
+                "categories": data.get("categories", []),
+            }
 
-# Singleton instance
+        if rtype == "contact":
+            links = data.get("links", [])
+            if not links:
+                return {
+                    "type": "text",
+                    "content": "You can contact Arnav via GitHub or LinkedIn."
+                }
+
+            return {
+                "type": "contact",
+                "message": data.get("message", ""),
+                "links": links,
+            }
+
+        return {
+            "type": "text",
+            "content": data.get("content", raw)
+        }
+
+
+# singleton
 llm_service = LLMService() if settings.GROQ_API_KEY else None
