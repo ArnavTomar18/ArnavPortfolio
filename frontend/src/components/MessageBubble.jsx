@@ -64,7 +64,7 @@ export default function MessageBubble({ message }) {
 
         {/* ✅ FALLBACK (IMPORTANT) */}
         {!isUser &&
-          !['text', 'skills', 'project'].includes(response.type) && (
+          !['text', 'skills', 'project', 'contact'].includes(response.type) && (
             <div className="bubble bubble-ai-msg">
               {JSON.stringify(response)}
             </div>
@@ -75,6 +75,26 @@ export default function MessageBubble({ message }) {
           {formatTime(message.timestamp)}
         </span>
       </div>
+
+      {!isUser && response.type === 'contact' && (
+        <div className="bubble bubble-ai-msg">
+          <strong>Contact:</strong>
+
+          <p>{response.message}</p>
+
+          {response.links?.length > 0 && (
+            <ul>
+              {response.links.map((link, i) => (
+                <li key={i}>
+                  <a href={link.url} target="_blank" rel="noreferrer">
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* User avatar */}
       {isUser && (

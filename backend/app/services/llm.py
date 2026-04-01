@@ -93,8 +93,54 @@ class LLMService:
 
 User question: {user_message}
 
-Respond with valid JSON only. Choose the most appropriate response type (text, project, skills, or contact).
-No markdown. No explanation. Just the JSON object."""
+You MUST return strictly valid JSON.
+
+Use ONLY one of these formats:
+
+1. TEXT:
+{{
+  "type": "text",
+  "content": "your answer"
+}}
+
+2. SKILLS:
+{{
+  "type": "skills",
+  "summary": "short summary of skills",
+  "categories": [
+    {{ "name": "Category Name", "items": ["skill1", "skill2"] }}
+  ]
+}}
+
+3. PROJECT:
+{{
+  "type": "project",
+  "title": "project name",
+  "description": "what it does",
+  "tech_stack": ["tech1", "tech2"],
+  "github": "url or null",
+  "live_demo": "url or null",
+  "highlights": ["point1", "point2"]
+}}
+
+4. CONTACT:
+{{
+  "type": "contact",
+  "message": "how to contact Arnav",
+  "links": [
+    {{ "label": "GitHub", "url": "https://github.com/arnavtomar18" }},
+    {{ "label": "LinkedIn", "url": "https://linkedin.com/in/arnavtomar18" }}
+    {{ "label": "Email", "url": "mailto:arnavtomar1812007@gmail.com" }}
+  ]
+}}
+
+Rules:
+- NEVER return empty fields
+- NEVER leave links empty for contact
+- NEVER invent information
+- If data is missing, return type "text"
+- Return ONLY JSON (no explanation, no markdown)
+"""
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -166,12 +212,17 @@ No markdown. No explanation. Just the JSON object."""
                     "summary": data.get("summary", ""),
                     "categories": data.get("categories", []),
                 }
-
             elif response_type == "contact":
+                links = data.get("links", [])
+                if not links:
+                    return {
+                        "type": "text",
+                        "content": "You can contact Arnav via GitHub or LinkedIn."
+                    }
                 return {
                     "type": "contact",
-                    "message": data.get("message", ""),
-                    "links": data.get("links", []),
+                    "message": data.get("message", "You can reach Arnav here:"),
+                    "links": links,
                 }
 
             else:

@@ -47,13 +47,22 @@ class RAGService:
         
         # Step 5: Update memory with this exchange
         memory_service.add_message(session_id, MessageRole.USER, user_message)
-        
-        # Store assistant message as text summary
-        if response.get("type") == "project":
-            assistant_summary = f"I provided information about the project: {response.get('title', 'unknown project')}"
+
+        # ✅ FIXED summary handling
+        rtype = response.get("type")
+
+        if rtype == "project":
+            assistant_summary = f"Project: {response.get('title', '')}"
+
+        elif rtype == "skills":
+            assistant_summary = "Discussed Arnav's skills"
+
+        elif rtype == "contact":
+            assistant_summary = "Shared contact information"
+
         else:
-            assistant_summary = response.get("content", "")[:500]  # Truncate for memory efficiency
-        
+            assistant_summary = response.get("content", "")[:500]
+
         memory_service.add_message(session_id, MessageRole.ASSISTANT, assistant_summary)
         
         logger.info(f"RAG query completed for session {session_id}. Response type: {response.get('type')}")
@@ -70,19 +79,20 @@ class RAGService:
             results = await vector_store.similarity_search(query, k=settings.TOP_K_RESULTS)
             
             if not results:
-                logger.warning("No relevant context found in vector store")
+                logger.warning("Using fallback context — FAISS returned no data")
                 return self._get_fallback_context(), []
             
             context_parts = []
             sources = []
             
             for doc, score in results:
-                if score > 0.2:  # Minimum relevance threshold
+                if score > 0.1:  # Minimum relevance threshold
                     context_parts.append(doc["content"])
                     if doc.get("source"):
                         sources.append(doc["source"])
             
             if not context_parts:
+                logger.warning("Using fallback context — no relevant chunks after filtering")
                 return self._get_fallback_context(), []
             
             context = "\n\n---\n\n".join(context_parts)
@@ -94,11 +104,27 @@ class RAGService:
             return self._get_fallback_context(), []
     
     def _get_fallback_context(self) -> str:
-        """Fallback context when vector store has no results."""
-        return """Arnav Tomar is a Full Stack Developer specializing in AI, Machine Learning, 
-        Data Science, and Product Thinking. He builds intelligent, scalable products. 
-        For detailed information about specific projects or experiences, 
-        please check the portfolio or contact Arnav directly."""
+        return """
+    Arnav Tomar – Full Stack Developer
+    
+    Skills:
+    - AI, Machine Learning, Data Science
+    - Python, FastAPI, React
+    - Building scalable AI applications
+    
+    Projects:
+    - IntelliSearch: AI-powered search system
+    - OTT Recommender System: ML-based recommendation engine
+    - Portfolio Website: React + FastAPI backend with AI assistant
+    
+    Experience:
+    - Completed Ashna AI Internship (worked on AI and ML systems)
+    
+    Contact:
+    - GitHub: https://github.com/arnavtomar18
+    - LinkedIn: https://linkedin.com/in/arnavtomar18
+    - Email: mailto:arnavtomar1812007@gmail.com
+    """
     
     def _get_llm_service(self) -> LLMService:
         """Get or create LLM service instance."""
